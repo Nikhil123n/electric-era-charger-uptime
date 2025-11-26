@@ -1,0 +1,18 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+
+# Go build artifacts
+/build/
+bin/
+out/
+
+# Go modules
+go.sum
+
+# Visual Studio Code
+.vscode/
