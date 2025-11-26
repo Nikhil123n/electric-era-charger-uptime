@@ -1,84 +1,132 @@
-# Overview
+# README_Nikhil.md
+Charger Uptime Coding Challenge – Implementation Notes  
+Author: Nikhil Jivraj Arethiya
 
-This is a simple coding challenge to test your abilities. To join the software program at Electric Era, you must complete this challenge. 
+## 1. Goal
 
-# Challenge
+This document explains how my solution is structured and how I approached the problem.  
+The main README provided in the repository already describes the problem itself, so this file focuses on design, structure, and implementation choices.
 
-You must write a program that calculates uptime for stations in a charging network. It will take in a formatted input file that indicates individual charger uptime status for a given time period and write output to standard-output (`stdout`). 
+---
 
-**Station Uptime** is defined as the percentage of time that any charger at a station was available, out of the entire time period that any charger *at that station* was reporting in.
+## 2. High-Level Approach
 
-## Input File Format
+1. **Parse once, validate early**  
+   I read the entire input file, enforce all structural rules up front (sections, station definitions, charger ownership, report format), and stop immediately with `ERROR` if anything is inconsistent.
 
-The input file will be a simple ASCII text file. The first section will be a list of station IDs that indicate the Charger IDs present at each station. The second section will be a report of each Charger ID's availability reports. An availability report will contain the Charger ID, the start time, the end time, and if the charger was "up" (i.e. available) or not.
+2. **Represent reports as time intervals**  
+   Each availability record for a charger is stored as a simple `[start, end)` interval with a boolean `up` flag. This keeps the data model minimal and easy to reason about.
 
-The following preconditons will apply:
+3. **Compute station uptime from merged “up” intervals**  
+   For each station, I:
+   - Determine the global time window covered by all its chargers.  
+   - Collect all intervals where any charger is explicitly up.  
+   - Sort and merge overlapping intervals.  
+   - Sum the merged intervals to get the total “up” time.  
+   - Compute `floor(100 * totalUp / totalWindow)` as the uptime percentage.
 
-* Station ID will be guaranteed to be a **unsigned 32-bit integer** and guaranteed to be unique to any other Station ID.
-* Charger ID will be guaranteed to be a **unsigned 32-bit integer** and guaranteed to be unique across all Station IDs.
-* `start time nanos` and `end time nanos` are guaranteed to fit within a **unsigned 64-bit integer**.
-* `up` will always be `true` or `false`
-* Each Charger ID may have multiple availability report entries.
-* Report entries need not be contiguous in time for a given Charger ID. A gap in time in a given Charger ID's availability report should count as downtime.
+4. **Fail fast on invalid input**  
+   Any malformed input or inconsistent relationships (for example, a charger belonging to two stations) immediately results in `ERROR`, as required by the challenge.
 
+---
+
+## 3. File Layout
+
+The solution is split into four files to keep concerns separated and the code easier to read.
+
+- **main.go**  
+  Entry point.  
+  - Reads the input path from the command line.  
+  - Calls `parseInput` to build in-memory structures.  
+  - Calls `computeAllStationUptimes` to compute each station’s uptime.  
+  - Prints `<station_id> <uptime_pct>` for each station in ascending order.
+
+- **parser.go**  
+  Input parsing and validation.  
+  - Handles section transitions: `[Stations]` and `[Charger Availability Reports]`.  
+  - Populates three maps:
+    - `stationToChargers: stationID → []chargerID`  
+    - `chargerToStation: chargerID → stationID`  
+    - `chargerReports: chargerID → []Report`  
+  - Ensures:
+    - No charger belongs to more than one station.  
+    - No availability record references an undefined charger.  
+    - Stations are defined before reports.
+
+- **types.go**  
+  Shared data structures and helpers.  
+  - `Report` struct for availability intervals.  
+  - `StationResult` struct for final outputs.  
+  - `fail()` helper that prints `ERROR` and exits.  
+  - Small parsing helpers for integers and booleans.  
+  - `computePercentage()` for safe percentage calculation using `math/big` to avoid overflow.
+
+- **uptime.go**  
+  Core uptime calculation.  
+  - `computeAllStationUptimes`:
+    - Iterates over stations in sorted order.  
+    - Calls `computeStationUptime` for each one.  
+  - `computeStationUptime`:
+    - Finds the earliest start and latest end timestamps across all chargers in the station.  
+    - Collects all `up == true` intervals into one list.  
+    - Sorts and merges intervals to avoid double-counting overlapping time.  
+    - Computes the uptime percentage relative to the station’s total window.
+
+(Additionally, a `go.mod` file is created via `go mod init charger_uptime` to treat this folder as a Go module.)
+
+---
+
+## 4. Edge Cases and Validation
+
+Some specific cases I handle explicitly:
+
+- **Station with chargers but no reports**  
+  Considered invalid input and results in `ERROR`.
+
+- **Overlapping “up” intervals**  
+  When multiple chargers are up at the same time, or a single charger has overlapping records, merging ensures overlapping ranges are not double-counted.
+
+- **Zero-length total window**  
+  If all reports start and end at the same time, the total window length is zero. In that case, the station uptime is treated as `0`.
+
+- **Malformed lines**  
+  Wrong token counts, invalid numbers, or non-boolean values cause an immediate `ERROR`.
+
+---
+
+## 5. How to Run
+
+From the project directory (where `main.go`, `parser.go`, `types.go`, `uptime.go`, and `go.mod` live):
+
+### One-time setup (already done in this project)
+```bash
+go mod init charger_uptime
 ```
-[Stations]
-<Station ID 1> <Charger ID 1> <Charger ID 2> ... <Charger ID n>
-...
-<Station ID n> ...
 
-[Charger Availability Reports]
-<Charger ID 1> <start time nanos> <end time nanos> <up (true/false)>
-<Charger ID 1> <start time nanos> <end time nanos> <up (true/false)>
-...
-<Charger ID 2> <start time nanos> <end time nanos> <up (true/false)>
-<Charger ID 2> <start time nanos> <end time nanos> <up (true/false)>
-...
-<Charger ID n> <start time nanos> <end time nanos> <up (true/false)>
+### Run with an input file
+```bash
+go run . input_1.txt
 ```
 
-## Program Parameters and Runtime Conditions
+This compiles all Go files in the module and passes `input_1.txt` as the argument to the program.
 
-Your program will be executed in a Linux environment running on an `amd64` architecture. If your chosen language of submission is compiled, ensure it compiles in that environment. Please avoid use of non-standard dependencies. 
+Output format:
 
-The program should accept a single argument, the path to the input file. The input file may not necessarily be co-located in the same folder as the program.
-
-Example CLI execution:
-```
-./your_submission relative/path/to/input/file
+```text
+<station_id> <uptime_percentage>
 ```
 
-## Output Format
+Stations are always printed in ascending station ID order.
 
-The output shall be written to `stdout`. If the input is invalid, please simply print `ERROR` and exit. `stderr` may contain detailed error information but is not mandatory. If there is no error, please write `stdout` as follows, and then exit gracefully.
+---
 
-```
-<Station ID 1> <Station ID 1 uptime>
-<Station ID 2> <Station ID 2 uptime>
-...
-<Station ID n> <Station ID n uptime>
-```
+## 6. Summary
 
-`Station ID n uptime` should be an integer in the range [0-100] representing the given station's uptime percentage. The value should be rounded down to the nearest percent.
+The solution prioritizes:
 
-Please output Station IDs in *ascending order*.
+- Clear structure (separate files for parsing, types, and uptime logic)  
+- Strict adherence to the input specification and error behavior  
+- Correct handling of gaps and overlaps in time intervals  
+- Simplicity in data structures while remaining efficient and scalable  
 
-# Testing and Submission 
-
-This repository contains a few example input files, along with the expected stdout output (this expected stdout is encoded in a separate paired file).
-
-Please submit the following in a zip file to `coding-challenge-submissions@electricera.tech` for consideration:
-* Your full source code for the solution
-* Any explanatory documents (text file, markdown, or PDF)
-* Any unit/integration tests
-* Instructions on how to compile (if compiled) and run the solution 
-
-If any component of the prompt is ambiguous or under-defined, please explain how your program resolves that ambiguity in your explanatory documents.
-
-# Considerations
-
-All aspects of your solution will be considered. Be mindful of:
-* Correctness for both normal and edge cases
-* Error-handling for improper inputs or unmet preconditions
-* Maintainability and readability of your solution
-* Scalability of the solution with increasingly large datasets
+This layout is intended to make the logic easy to follow and straightforward to extend or test.
